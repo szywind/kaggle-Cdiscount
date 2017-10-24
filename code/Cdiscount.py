@@ -52,7 +52,7 @@ categories_df.head()
 
 
 class Cdiscount():
-    def __init__(self, height=180, width=180, batch_size=32, max_epochs=5, base_model='vgg16', num_classes=5270):
+    def __init__(self, height=180, width=180, batch_size=32, max_epochs=40, base_model='inceptionV3', num_classes=5270):
         self.height = height
         self.width = width
         self.batch_size = batch_size
@@ -69,7 +69,7 @@ class Cdiscount():
 
         if not os.path.exists("train_images.csv") or not os.path.exists("val_images.csv"):
             self.train_val_split()
-
+        self.data_generator()
 
     def make_category_tables(self):
         self.cat2idx = {}
@@ -204,7 +204,7 @@ class Cdiscount():
 
     def data_generator(self):
         ''' First load the lookup tables from the CSV files '''
-        categories_df = pd.read_csv("categories.csv", index_col=0)
+        # categories_df = pd.read_csv("categories.csv", index_col=0)
 
         train_offsets_df = pd.read_csv("train_offsets.csv", index_col=0)
         train_images_df = pd.read_csv("train_images.csv", index_col=0)
@@ -289,38 +289,48 @@ class Cdiscount():
 
         self.num_train_images = len(train_images_df)
         self.num_val_images = len(val_images_df)
-        batch_size = 128
 
         # Tip: use ImageDataGenerator for data augmentation and preprocessing.
         train_datagen = ImageDataGenerator()
         self.train_gen = BSONIterator(train_bson_file, train_images_df, train_offsets_df,
-                                 num_classes, train_datagen, lock,
-                                 batch_size=batch_size, shuffle=True)
+                                 self.num_classes, train_datagen, lock,
+                                 batch_size=self.batch_size, shuffle=True)
 
         val_datagen = ImageDataGenerator()
         self.val_gen = BSONIterator(train_bson_file, val_images_df, train_offsets_df,
-                               num_classes, val_datagen, lock,
-                               batch_size=batch_size, shuffle=True)
+                               self.num_classes, val_datagen, lock,
+                               batch_size=self.batch_size, shuffle=True)
 
 
-        next(self.train_gen)  # warm-up
-
-        bx, by = next(self.train_gen)
-        plt.imshow(bx[-1].astype(np.uint8))
-        cat_idx = np.argmax(by[-1])
-        cat_id = self.idx2cat[cat_idx]
-        categories_df.loc[cat_id]
-
-
-
-        by = next(self.val_gen)
-        plt.imshow(bx[-1].astype(np.uint8))
-        cat_idx = np.argmax(by[-1])
-        cat_id = self.idx2cat[cat_idx]
-        categories_df.loc[cat_id]
+        # next(self.train_gen)  # warm-up
+        #
+        # bx, by = next(self.train_gen)
+        # plt.imshow(bx[-1].astype(np.uint8))
+        # cat_idx = np.argmax(by[-1])
+        # cat_id = self.idx2cat[cat_idx]
+        # categories_df.loc[cat_id]
+        #
+        #
+        #
+        # by = next(self.val_gen)
+        # plt.imshow(bx[-1].astype(np.uint8))
+        # cat_idx = np.argmax(by[-1])
+        # cat_id = self.idx2cat[cat_idx]
+        # categories_df.loc[cat_id]
 
     def train(self):
         ''' training '''
+        callbacks = [ModelCheckpoint(filepath='../weights/best_weights_{}.hdf5'.format(self.base_model),
+                                     save_best_only=True,
+                                     save_weights_only=True),
+                     ReduceLROnPlateau(factor=0.5,
+                                       patience=2,
+                                       verbose=1,
+                                       epsilon=1e-4),
+                     EarlyStopping(min_delta=1e-4,
+                                   patience=4,
+                                   verbose=1)]
+
         models = Models(input_shape=(self.height, self.width, 3), classes=self.num_classes)
         if self.base_model == 'vgg16':
             models.vgg16()
@@ -334,75 +344,95 @@ class Cdiscount():
             print('Uknown base model')
             raise SystemExit
 
-        callbacks = [ModelCheckpoint(filepath='weights/best_weights_' + self.base_model + '.hdf5',
-                                     save_best_only=True,
-                                     save_weights_only=True),
-                     ReduceLROnPlateau(factor=0.5,
-                                       patience=2,
-                                       verbose=1,
-                                       epsilon=1e-4),
-                     EarlyStopping(min_delta=1e-4,
-                                   patience=4,
-                                   verbose=1)]
-
         models.compile(optimizer=RMSprop(lr=1e-5))
-        model = models.get_model()
-        model.summary()
+        self.model = models.get_model()
 
-        model.fit_generator(generator=self.train_gen,
+        self.model.summary()
+
+        self.model.fit_generator(generator=self.train_gen,
                             steps_per_epoch=np.ceil(self.num_train_images / float(self.batch_size)),
                             epochs=self.max_epochs,
                             verbose=1,
-                            validation_data=self.valid_gen,
+                            validation_data=self.val_gen,
                             validation_steps=np.ceil(self.num_val_images / float(self.batch_size)),
-                            callbacks=callbacks)
+                            callbacks=callbacks,
+                            workers=8)
+
+        # from keras.models import Sequential
+        # from keras.layers import Dropout, Flatten, Dense
+        # from keras.layers.convolutional import Conv2D
+        # from keras.layers.pooling import MaxPooling2D, GlobalAveragePooling2D
+        #
+        # self.model = Sequential()
+        # self.model.add(Conv2D(32, 3, padding="same", activation="relu", input_shape=(180, 180, 3)))
+        # self.model.add(MaxPooling2D())
+        # self.model.add(Conv2D(64, 3, padding="same", activation="relu"))
+        # self.model.add(MaxPooling2D())
+        # self.model.add(Conv2D(128, 3, padding="same", activation="relu"))
+        # self.model.add(MaxPooling2D())
+        # self.model.add(GlobalAveragePooling2D())
+        # self.model.add(Dense(self.num_classes, activation="softmax"))
+        #
+        # self.model.compile(optimizer="adam",
+        #               loss="categorical_crossentropy",
+        #               metrics=["accuracy"])
+        #
+        # self.model.summary()
+        #
+        # # To train the model:
+        # self.model.fit_generator(self.train_gen,
+        #                     steps_per_epoch=10,  # num_train_images // batch_size,
+        #                     epochs=3,
+        #                     validation_data=self.val_gen,
+        #                     validation_steps=10,  # num_val_images // batch_size,
+        #                     workers=8,
+        #                     callbacks=callbacks)
+
+        # To evaluate on the validation set:
+        #model.evaluate_generator(val_gen, steps=num_val_images // batch_size, workers=8)
+
+    def test(self):
+        ''' test '''
+        from keras import backend as K
+        from keras.preprocessing.image import ImageDataGenerator
+        from keras.applications.inception_v3 import preprocess_input
+
+        self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
+        submission_df = pd.read_csv(data_dir + "sample_submission.csv")
+        submission_df.head()
+
+        test_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
+        data = bson.decode_file_iter(open(test_bson_path, "rb"))
+
+        with tqdm(total=num_test_products) as pbar:
+            for c, d in enumerate(data):
+                product_id = d["_id"]
+                num_imgs = len(d["imgs"])
+
+                batch_x = np.zeros((num_imgs, 180, 180, 3), dtype=K.floatx())
+
+                for i in range(num_imgs):
+                    bson_img = d["imgs"][i]["picture"]
+
+                    # Load and preprocess the image.
+                    img = load_img(io.BytesIO(bson_img), target_size=(180, 180))
+                    x = img_to_array(img)
+                    x = test_datagen.random_transform(x)
+                    x = test_datagen.standardize(x)
+
+                    # Add the image to the batch.
+                    batch_x[i] = x
+
+                prediction = self.model.predict(batch_x, batch_size=num_imgs)
+                avg_pred = prediction.mean(axis=0)
+                cat_idx = np.argmax(avg_pred)
+
+                submission_df.iloc[c]["category_id"] = self.idx2cat[cat_idx]
+                pbar.update()
+
+        submission_df.to_csv("../submit/my_submission.csv.gz", compression="gzip", index=False)
 
 
-
-# To evaluate on the validation set:
-#model.evaluate_generator(val_gen, steps=num_val_images // batch_size, workers=8)
-
-
-#
-# ''' test '''
-# from keras import backend as K
-# from keras.preprocessing.image import ImageDataGenerator
-#
-# submission_df = pd.read_csv(data_dir + "sample_submission.csv")
-# submission_df.head()
-#
-# test_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
-# data = bson.decode_file_iter(open(test_bson_path, "rb"))
-#
-# with tqdm(total=num_test_products) as pbar:
-#     for c, d in enumerate(data):
-#         product_id = d["_id"]
-#         num_imgs = len(d["imgs"])
-#
-#         batch_x = np.zeros((num_imgs, 180, 180, 3), dtype=K.floatx())
-#
-#         for i in range(num_imgs):
-#             bson_img = d["imgs"][i]["picture"]
-#
-#             # Load and preprocess the image.
-#             img = load_img(io.BytesIO(bson_img), target_size=(180, 180))
-#             x = img_to_array(img)
-#             x = test_datagen.random_transform(x)
-#             x = test_datagen.standardize(x)
-#
-#             # Add the image to the batch.
-#             batch_x[i] = x
-#
-#         prediction = model.predict(batch_x, batch_size=num_imgs)
-#         avg_pred = prediction.mean(axis=0)
-#         cat_idx = np.argmax(avg_pred)
-#
-#         submission_df.iloc[c]["category_id"] = idx2cat[cat_idx]
-#         pbar.update()
-#
-# submission_df.to_csv("my_submission.csv.gz", compression="gzip", index=False)
-#
-#
 
 
 
@@ -410,3 +440,4 @@ class Cdiscount():
 if __name__ == "__main__":
     cdis = Cdiscount()
     cdis.train()
+    cdis.test()
