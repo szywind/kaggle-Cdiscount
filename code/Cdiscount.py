@@ -1,6 +1,6 @@
 
 # https://www.kaggle.com/humananalog/keras-generator-for-reading-directly-from-bson
-import os, sys, math, io
+import os, sys, math, io, cv2
 import numpy as np
 import pandas as pd
 import multiprocessing as mp
@@ -21,8 +21,10 @@ from keras.optimizers import RMSprop
 
 from keras import backend as K
 from keras.preprocessing.image import ImageDataGenerator
-from keras.applications.inception_v3 import preprocess_input
+# from keras.applications.inception_v3 import preprocess_input
+from keras.applications.resnet50 import preprocess_input
 
+from resnet_101 import resnet101_model
 # Input data files are available in the "../input/" directory.
 # For example, running this (by clicking run or pressing Shift+Enter) will list the files in the input directory
 
@@ -56,7 +58,7 @@ categories_df.head()
 
 
 class Cdiscount():
-    def __init__(self, height=180, width=180, batch_size=100, max_epochs=40, base_model='inceptionV3', num_classes=5270):
+    def __init__(self, height=200, width=200, batch_size=24, max_epochs=40, base_model='inceptionV3', num_classes=5270):
         self.height = height
         self.width = width
         self.batch_size = batch_size
@@ -74,6 +76,26 @@ class Cdiscount():
         if not os.path.exists("train_images.csv") or not os.path.exists("val_images.csv"):
             self.train_val_split()
         self.data_generator()
+
+        # models = Models(input_shape=(self.height, self.width, 3), classes=self.num_classes)
+        # if self.base_model == 'vgg16':
+        #     models.vgg16()
+        # elif self.base_model == 'vgg19':
+        #     models.vgg19()
+        # elif self.base_model == 'resnet50':
+        #     models.resnet50()
+        # elif self.base_model == 'inceptionV3':
+        #     models.inceptionV3()
+        # else:
+        #     print('Uknown base model')
+        #     raise SystemExit
+        #
+        # models.compile(optimizer=RMSprop(lr=1e-4))
+        # self.model = models.get_model()
+
+        self.model = resnet101_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
+        self.model.summary()
+
 
     def make_category_tables(self):
         self.cat2idx = {}
@@ -267,7 +289,9 @@ class Cdiscount():
                     # Preprocess the image.
                     x = img_to_array(img)
                     x = self.image_data_generator.random_transform(x)
+                    x = x[np.newaxis, ...]
                     x = self.image_data_generator.standardize(x)
+                    x = x[0]
 
                     # Add the image and the label to the batch (one-hot encoded).
                     batch_x[i] = x
@@ -295,15 +319,19 @@ class Cdiscount():
         self.num_val_images = len(val_images_df)
 
         # Tip: use ImageDataGenerator for data augmentation and preprocessing.
-        train_datagen = ImageDataGenerator(horizontal_flip=True, preprocessing_function=preprocess_input)
+        train_datagen = ImageDataGenerator(horizontal_flip=True,
+                                           preprocessing_function=preprocess_input,
+                                           height_shift_range=0.05,
+                                           width_shift_range=0.05,
+                                           zoom_range=[1, 1.1])
         self.train_gen = BSONIterator(train_bson_file, train_images_df, train_offsets_df,
                                  self.num_classes, train_datagen, lock,
-                                 batch_size=self.batch_size, shuffle=True)
+                                 batch_size=self.batch_size, shuffle=True, target_size=(self.height, self.width))
 
         val_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
         self.val_gen = BSONIterator(train_bson_file, val_images_df, train_offsets_df,
                                self.num_classes, val_datagen, lock,
-                               batch_size=self.batch_size, shuffle=True)
+                               batch_size=self.batch_size, shuffle=True, target_size=(self.height, self.width))
 
 
         # next(self.train_gen)  # warm-up
@@ -334,24 +362,6 @@ class Cdiscount():
                      EarlyStopping(min_delta=1e-4,
                                    patience=4,
                                    verbose=1)]
-
-        models = Models(input_shape=(self.height, self.width, 3), classes=self.num_classes)
-        if self.base_model == 'vgg16':
-            models.vgg16()
-        elif self.base_model == 'vgg19':
-            models.vgg19()
-        elif self.base_model == 'resnet50':
-            models.resnet50()
-        elif self.base_model == 'inceptionV3':
-            models.inceptionV3()
-        else:
-            print('Uknown base model')
-            raise SystemExit
-
-        models.compile(optimizer=RMSprop(lr=1e-4))
-        self.model = models.get_model()
-
-        self.model.summary()
 
         self.model.fit_generator(generator=self.train_gen,
                             steps_per_epoch=np.ceil(self.num_train_images / float(self.batch_size)),
@@ -418,8 +428,12 @@ class Cdiscount():
                     img = load_img(io.BytesIO(bson_img), target_size=(180, 180))
                     x = img_to_array(img)
                     x = test_datagen.random_transform(x)
+
+                    x = x[np.newaxis, ...]
+
                     x = test_datagen.standardize(x)
 
+                    x = x[0]
                     # Add the image to the batch.
                     batch_x[i] = x
 
