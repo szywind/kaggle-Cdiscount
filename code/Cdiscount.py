@@ -19,6 +19,10 @@ from tqdm import *
 from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 from keras.optimizers import RMSprop
 
+from keras import backend as K
+from keras.preprocessing.image import ImageDataGenerator
+from keras.applications.inception_v3 import preprocess_input
+
 # Input data files are available in the "../input/" directory.
 # For example, running this (by clicking run or pressing Shift+Enter) will list the files in the input directory
 
@@ -52,7 +56,7 @@ categories_df.head()
 
 
 class Cdiscount():
-    def __init__(self, height=180, width=180, batch_size=32, max_epochs=40, base_model='inceptionV3', num_classes=5270):
+    def __init__(self, height=180, width=180, batch_size=100, max_epochs=40, base_model='inceptionV3', num_classes=5270):
         self.height = height
         self.width = width
         self.batch_size = batch_size
@@ -291,12 +295,12 @@ class Cdiscount():
         self.num_val_images = len(val_images_df)
 
         # Tip: use ImageDataGenerator for data augmentation and preprocessing.
-        train_datagen = ImageDataGenerator()
+        train_datagen = ImageDataGenerator(horizontal_flip=True, preprocessing_function=preprocess_input)
         self.train_gen = BSONIterator(train_bson_file, train_images_df, train_offsets_df,
                                  self.num_classes, train_datagen, lock,
                                  batch_size=self.batch_size, shuffle=True)
 
-        val_datagen = ImageDataGenerator()
+        val_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
         self.val_gen = BSONIterator(train_bson_file, val_images_df, train_offsets_df,
                                self.num_classes, val_datagen, lock,
                                batch_size=self.batch_size, shuffle=True)
@@ -344,7 +348,7 @@ class Cdiscount():
             print('Uknown base model')
             raise SystemExit
 
-        models.compile(optimizer=RMSprop(lr=1e-5))
+        models.compile(optimizer=RMSprop(lr=1e-4))
         self.model = models.get_model()
 
         self.model.summary()
@@ -393,10 +397,6 @@ class Cdiscount():
 
     def test(self):
         ''' test '''
-        from keras import backend as K
-        from keras.preprocessing.image import ImageDataGenerator
-        from keras.applications.inception_v3 import preprocess_input
-
         self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
         submission_df = pd.read_csv(data_dir + "sample_submission.csv")
         submission_df.head()
