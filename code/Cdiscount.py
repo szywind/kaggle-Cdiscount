@@ -352,6 +352,8 @@ class Cdiscount():
 
     def train(self):
         ''' training '''
+        self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
+
         callbacks = [ModelCheckpoint(filepath='../weights/best_weights_{}.hdf5'.format(self.base_model),
                                      save_best_only=True,
                                      save_weights_only=True),
