@@ -21,10 +21,12 @@ from keras.optimizers import RMSprop
 
 from keras import backend as K
 from keras.preprocessing.image import ImageDataGenerator
+from keras.preprocessing.image import Iterator
+
 # from keras.applications.inception_v3 import preprocess_input
 from keras.applications.resnet50 import preprocess_input
 
-from resnet_101 import resnet101_model
+from resnet_152 import resnet152_model
 # Input data files are available in the "../input/" directory.
 # For example, running this (by clicking run or pressing Shift+Enter) will list the files in the input directory
 
@@ -56,9 +58,16 @@ categories_df.to_csv("categories.csv")
 categories_df.head()
 
 
+def random_crop(img, dstSize):
+    import random
+    srcH, srcW = img.shape[:2]
+    dstH, dstW = dstSize
+    y0 = random.randrange(0, srcH - dstH)
+    x0 = random.randrange(0, srcW - dstW)
+    return img[y0:y0+dstH, x0:x0+dstW]
 
 class Cdiscount():
-    def __init__(self, height=200, width=200, batch_size=24, max_epochs=40, base_model='inceptionV3', num_classes=5270):
+    def __init__(self, height=160, width=160, batch_size=32, max_epochs=40, base_model='inceptionV3', num_classes=5270):
         self.height = height
         self.width = width
         self.batch_size = batch_size
@@ -93,7 +102,7 @@ class Cdiscount():
         # models.compile(optimizer=RMSprop(lr=1e-4))
         # self.model = models.get_model()
 
-        self.model = resnet101_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
+        self.model = resnet152_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
         self.model.summary()
 
 
@@ -236,12 +245,6 @@ class Cdiscount():
         train_images_df = pd.read_csv("train_images.csv", index_col=0)
         val_images_df = pd.read_csv("val_images.csv", index_col=0)
 
-
-
-        from keras.preprocessing.image import Iterator
-        from keras.preprocessing.image import ImageDataGenerator
-        from keras import backend as K
-
         class BSONIterator(Iterator):
             def __init__(self, bson_file, images_df, offsets_df, num_class,
                          image_data_generator, lock, target_size=(180, 180),
@@ -284,10 +287,11 @@ class Cdiscount():
                     bson_img = item["imgs"][img_idx]["picture"]
 
                     # Load the image.
-                    img = load_img(io.BytesIO(bson_img), target_size=self.target_size)
+                    img = load_img(io.BytesIO(bson_img)) #, target_size=self.target_size)
 
                     # Preprocess the image.
                     x = img_to_array(img)
+                    x = random_crop(x, self.target_size)
                     x = self.image_data_generator.random_transform(x)
                     x = x[np.newaxis, ...]
                     x = self.image_data_generator.standardize(x)
@@ -321,9 +325,10 @@ class Cdiscount():
         # Tip: use ImageDataGenerator for data augmentation and preprocessing.
         train_datagen = ImageDataGenerator(horizontal_flip=True,
                                            preprocessing_function=preprocess_input,
-                                           height_shift_range=0.05,
-                                           width_shift_range=0.05,
-                                           zoom_range=[1, 1.1])
+                                           shear_range=0.2,
+                                           #height_shift_range=0.1,
+                                           #width_shift_range=0.1,
+                                           zoom_range=[1.0, 1.2])
         self.train_gen = BSONIterator(train_bson_file, train_images_df, train_offsets_df,
                                  self.num_classes, train_datagen, lock,
                                  batch_size=self.batch_size, shuffle=True, target_size=(self.height, self.width))
@@ -352,7 +357,7 @@ class Cdiscount():
 
     def train(self):
         ''' training '''
-        self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
+        # self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
 
         callbacks = [ModelCheckpoint(filepath='../weights/best_weights_{}.hdf5'.format(self.base_model),
                                      save_best_only=True,
@@ -421,13 +426,13 @@ class Cdiscount():
                 product_id = d["_id"]
                 num_imgs = len(d["imgs"])
 
-                batch_x = np.zeros((num_imgs, 180, 180, 3), dtype=K.floatx())
+                batch_x = np.zeros((num_imgs, self.height, self.width, 3), dtype=K.floatx())
 
                 for i in range(num_imgs):
                     bson_img = d["imgs"][i]["picture"]
 
                     # Load and preprocess the image.
-                    img = load_img(io.BytesIO(bson_img), target_size=(180, 180))
+                    img = load_img(io.BytesIO(bson_img), target_size=(self.height, self.width))
                     x = img_to_array(img)
                     x = test_datagen.random_transform(x)
 
