@@ -8,7 +8,7 @@ from keras.models import Model
 from keras import backend as K
 
 from custom_layers.scale_layer import Scale
-from loss import focus_loss
+from loss import focal_loss
 
 import sys
 sys.setrecursionlimit(3000)
@@ -173,6 +173,6 @@ def resnet101_model(img_rows, img_cols, color_type=1, num_classes=None):
     # sgd = RMSpropAccum(lr=1e-4, decay=1e-6, accumulator=16)
 
     # model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
-    model.compile(optimizer=sgd, loss=focus_loss, metrics=['accuracy'])
+    model.compile(optimizer=sgd, loss=focal_loss, metrics=['accuracy', 'categorical_crossentropy'])
 
     return model

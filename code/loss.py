@@ -15,7 +15,7 @@ import tensorflow as tf
 
 
 
-def focus_loss(y_true, y_pred, gamma=2.):
+def focal_loss(y_true, y_pred, gamma=2.):
     y_pred /= K.sum(y_pred, axis=-1, keepdims=True)
 
     epsilon = K.epsilon()
