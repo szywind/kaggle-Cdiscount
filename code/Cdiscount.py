@@ -63,15 +63,15 @@ def random_crop(img, dstSize, center=False):
     srcH, srcW = img.shape[:2]
     dstH, dstW = dstSize
     if center:
-        y0 = (srcH - dstH) / 2
-        x0 = (srcW - dstW) / 2
+        y0 = int((srcH - dstH) / 2)
+        x0 = int((srcW - dstW) / 2)
     else:
         y0 = random.randrange(0, srcH - dstH)
         x0 = random.randrange(0, srcW - dstW)
     return img[y0:y0+dstH, x0:x0+dstW]
 
 class Cdiscount():
-    def __init__(self, height=160, width=160, batch_size=48, max_epochs=40, base_model='inceptionV3', num_classes=5270):
+    def __init__(self, height=160, width=160, batch_size=36, max_epochs=40, base_model='inceptionV3', num_classes=5270):
         self.height = height
         self.width = width
         self.batch_size = batch_size
@@ -334,10 +334,10 @@ class Cdiscount():
         # Tip: use ImageDataGenerator for data augmentation and preprocessing.
         train_datagen = ImageDataGenerator(horizontal_flip=True,
                                            preprocessing_function=preprocess_input,
-                                           shear_range=0.2,
+                                           shear_range=0.1,
                                            #height_shift_range=0.1,
                                            #width_shift_range=0.1,
-                                           zoom_range=[1.0, 1.2])
+                                           zoom_range=[1.0, 1.1])
         self.train_gen = BSONIterator(train_bson_file, train_images_df, train_offsets_df,
                                  self.num_classes, train_datagen, lock,
                                  batch_size=self.batch_size, shuffle=True,
@@ -368,12 +368,12 @@ class Cdiscount():
 
     def train(self):
         ''' training '''
-        # self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
+        self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
 
         callbacks = [ModelCheckpoint(filepath='../weights/best_weights_{}.hdf5'.format(self.base_model),
                                      save_best_only=True,
                                      save_weights_only=True),
-                     ReduceLROnPlateau(factor=0.5,
+                     ReduceLROnPlateau(factor=0.1,
                                        patience=2,
                                        verbose=1,
                                        epsilon=1e-4),
@@ -389,15 +389,20 @@ class Cdiscount():
                             validation_steps=np.ceil(self.num_val_images / float(self.batch_size)),
                             callbacks=callbacks,
                             workers=8)
-
-        self.model.fit_generator(generator=self.train_gen,
-                            steps_per_epoch=np.ceil(self.num_train_images / float(self.batch_size)),
-                            epochs=self.max_epochs,
-                            verbose=2,
-                            validation_data=self.val_gen,
-                            validation_steps=np.ceil(self.num_val_images / float(self.batch_size)),
-                            callbacks=callbacks,
-                            workers=8)
+        init_epochs = 1
+        for i in range(self.max_epochs):
+            # gradually decrease the learning rate
+            K.set_value(self.model.optimizer.lr, 0.95 * K.get_value(self.model.optimizer.lr))
+            start_epoch = (i * 2)
+            epochs = ((i + 1) * 2)
+            self.model.fit_generator(generator=self.train_gen,
+                                steps_per_epoch=np.ceil(self.num_train_images / float(self.batch_size)),
+                                verbose=2,
+                                validation_data=self.val_gen,
+                                validation_steps=np.ceil(self.num_val_images / float(self.batch_size)),
+                                initial_epoch=start_epoch + init_epochs,
+                                epochs=epochs + init_epochs,
+                                callbacks=callbacks)
 
         # from keras.models import Sequential
         # from keras.layers import Dropout, Flatten, Dense
