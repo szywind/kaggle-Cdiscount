@@ -27,6 +27,8 @@ from keras.preprocessing.image import Iterator
 from keras.applications.resnet50 import preprocess_input
 
 from resnet_152 import resnet152_model
+from resnet_101 import resnet101_model
+
 # Input data files are available in the "../input/" directory.
 # For example, running this (by clicking run or pressing Shift+Enter) will list the files in the input directory
 
@@ -57,17 +59,22 @@ categories_df["category_idx"] = pd.Series(range(len(categories_df)), index=categ
 categories_df.to_csv("categories.csv")
 categories_df.head()
 
+num_fold_tta = 5
 
-def random_crop(img, dstSize):
+def random_crop(img, dstSize, center=False):
     import random
     srcH, srcW = img.shape[:2]
     dstH, dstW = dstSize
-    y0 = random.randrange(0, srcH - dstH)
-    x0 = random.randrange(0, srcW - dstW)
+    if center:
+        y0 = int((srcH - dstH) / 2)
+        x0 = int((srcW - dstW) / 2)
+    else:
+        y0 = random.randrange(0, srcH - dstH)
+        x0 = random.randrange(0, srcW - dstW)
     return img[y0:y0+dstH, x0:x0+dstW]
 
 class Cdiscount():
-    def __init__(self, height=160, width=160, batch_size=32, max_epochs=40, base_model='inceptionV3', num_classes=5270):
+    def __init__(self, height=160, width=160, batch_size=40, max_epochs=40, base_model='inceptionV3', num_classes=5270):
         self.height = height
         self.width = width
         self.batch_size = batch_size
@@ -81,6 +88,8 @@ class Cdiscount():
 
         if not os.path.exists("train_offsets.csv"):
             self.read_bson_files()
+        else:
+            self.train_offsets_df = pd.DataFrame.from_csv("train_offsets.csv")
 
         if not os.path.exists("train_images.csv") or not os.path.exists("val_images.csv"):
             self.train_val_split()
@@ -102,7 +111,9 @@ class Cdiscount():
         # models.compile(optimizer=RMSprop(lr=1e-4))
         # self.model = models.get_model()
 
-        self.model = resnet152_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
+        # self.model = resnet152_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
+        self.model = resnet101_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
+
         self.model.summary()
 
 
@@ -156,20 +167,20 @@ class Cdiscount():
             df.sort_index(inplace=True)
             return df
 
-        train_offsets_df = read_bson(train_bson_path, num_records=num_train_products, with_categories=True)
+        self.train_offsets_df = read_bson(train_bson_path, num_records=num_train_products, with_categories=True)
 
-        train_offsets_df.head()
+        self.train_offsets_df.head()
 
-        train_offsets_df.to_csv("train_offsets.csv")
+        self.train_offsets_df.to_csv("train_offsets.csv")
 
         # How many products?
-        print("# products: ", len(train_offsets_df))
+        print("# products: ", len(self.train_offsets_df))
 
         # How many categories?
-        print("# category: ", len(train_offsets_df["category_id"].unique()))
+        print("# category: ", len(self.train_offsets_df["category_id"].unique()))
 
         # How many images in total?
-        print("# images: ", train_offsets_df["num_imgs"].sum())
+        print("# images: ", self.train_offsets_df["num_imgs"].sum())
 
     def train_val_split(self):
         def make_val_set(df, split_percentage=0.2, drop_percentage=0.):
@@ -213,7 +224,7 @@ class Cdiscount():
 
 
         train_images_df, val_images_df = make_val_set(self.train_offsets_df, split_percentage=0.2,
-                                                      drop_percentage=0.9)
+                                                      drop_percentage=0)
 
 
         train_images_df.head()
@@ -248,7 +259,7 @@ class Cdiscount():
         class BSONIterator(Iterator):
             def __init__(self, bson_file, images_df, offsets_df, num_class,
                          image_data_generator, lock, target_size=(180, 180),
-                         with_labels=True, batch_size=32, shuffle=False, seed=None):
+                         with_labels=True, batch_size=32, shuffle=False, seed=None, center=False):
 
                 self.file = bson_file
                 self.images_df = images_df
@@ -259,6 +270,7 @@ class Cdiscount():
                 self.image_data_generator = image_data_generator
                 self.target_size = tuple(target_size)
                 self.image_shape = self.target_size + (3,)
+                self.center = center
 
                 print("Found %d images belonging to %d classes." % (self.samples, self.num_class))
 
@@ -291,7 +303,7 @@ class Cdiscount():
 
                     # Preprocess the image.
                     x = img_to_array(img)
-                    x = random_crop(x, self.target_size)
+                    x = random_crop(x, self.target_size, center=self.center)
                     x = self.image_data_generator.random_transform(x)
                     x = x[np.newaxis, ...]
                     x = self.image_data_generator.standardize(x)
@@ -322,21 +334,26 @@ class Cdiscount():
         self.num_train_images = len(train_images_df)
         self.num_val_images = len(val_images_df)
 
+        print("# train data: ", self.num_train_images)
+        print("# val data: ", self.num_val_images)
         # Tip: use ImageDataGenerator for data augmentation and preprocessing.
         train_datagen = ImageDataGenerator(horizontal_flip=True,
                                            preprocessing_function=preprocess_input,
-                                           shear_range=0.2,
-                                           #height_shift_range=0.1,
-                                           #width_shift_range=0.1,
-                                           zoom_range=[1.0, 1.2])
+                                           # shear_range=0.2,
+                                           # height_shift_range=0.1,
+                                           # width_shift_range=0.1,
+                                           # zoom_range=[1.0, 1.2]
+                                           )
         self.train_gen = BSONIterator(train_bson_file, train_images_df, train_offsets_df,
                                  self.num_classes, train_datagen, lock,
-                                 batch_size=self.batch_size, shuffle=True, target_size=(self.height, self.width))
+                                 batch_size=self.batch_size, shuffle=True,
+                                 target_size=(self.height, self.width), center=False)
 
         val_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
         self.val_gen = BSONIterator(train_bson_file, val_images_df, train_offsets_df,
                                self.num_classes, val_datagen, lock,
-                               batch_size=self.batch_size, shuffle=True, target_size=(self.height, self.width))
+                               batch_size=self.batch_size, shuffle=True,
+                               target_size=(self.height, self.width), center=True)
 
 
         # next(self.train_gen)  # warm-up
@@ -357,12 +374,12 @@ class Cdiscount():
 
     def train(self):
         ''' training '''
-        # self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
+        self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
 
         callbacks = [ModelCheckpoint(filepath='../weights/best_weights_{}.hdf5'.format(self.base_model),
                                      save_best_only=True,
                                      save_weights_only=True),
-                     ReduceLROnPlateau(factor=0.5,
+                     ReduceLROnPlateau(factor=0.1,
                                        patience=2,
                                        verbose=1,
                                        epsilon=1e-4),
@@ -370,14 +387,27 @@ class Cdiscount():
                                    patience=4,
                                    verbose=1)]
 
-        self.model.fit_generator(generator=self.train_gen,
-                            steps_per_epoch=np.ceil(self.num_train_images / float(self.batch_size)),
-                            epochs=self.max_epochs,
-                            verbose=1,
-                            validation_data=self.val_gen,
-                            validation_steps=np.ceil(self.num_val_images / float(self.batch_size)),
-                            callbacks=callbacks,
-                            workers=8)
+
+
+        init_epochs = 0
+        for i in range(self.max_epochs):
+            # gradually decrease the learning rate
+            K.set_value(self.model.optimizer.lr, 0.95 * K.get_value(self.model.optimizer.lr))
+            start_epoch = (i * 2)
+            epochs = ((i + 1) * 2)
+            if i == 0:
+                verbose = 1
+            else:
+                verbose = 2
+            self.model.fit_generator(generator=self.train_gen,
+                                steps_per_epoch=np.ceil(self.num_train_images / float(self.batch_size)),
+                                verbose=verbose,
+                                validation_data=self.val_gen,
+                                validation_steps=np.ceil(self.num_val_images / float(self.batch_size)),
+                                initial_epoch=start_epoch + init_epochs,
+                                epochs=epochs + init_epochs,
+                                callbacks=callbacks)
+
 
         # from keras.models import Sequential
         # from keras.layers import Dropout, Flatten, Dense
@@ -428,23 +458,28 @@ class Cdiscount():
 
                 batch_x = np.zeros((num_imgs, self.height, self.width, 3), dtype=K.floatx())
 
-                for i in range(num_imgs):
-                    bson_img = d["imgs"][i]["picture"]
+                prediction = 0
+                for _ in range(num_fold_tta):
+                    for i in range(num_imgs):
+                        bson_img = d["imgs"][i]["picture"]
 
-                    # Load and preprocess the image.
-                    img = load_img(io.BytesIO(bson_img), target_size=(self.height, self.width))
-                    x = img_to_array(img)
-                    x = test_datagen.random_transform(x)
+                        # Load and preprocess the image.
+                        img = load_img(io.BytesIO(bson_img)) #, target_size=(self.height, self.width))
+                        x = img_to_array(img)
 
-                    x = x[np.newaxis, ...]
+                        x = random_crop(x, (self.height, self.width))
 
-                    x = test_datagen.standardize(x)
+                        x = test_datagen.random_transform(x)
 
-                    x = x[0]
-                    # Add the image to the batch.
-                    batch_x[i] = x
+                        x = x[np.newaxis, ...]
 
-                prediction = self.model.predict(batch_x, batch_size=num_imgs)
+                        x = test_datagen.standardize(x)
+
+                        x = x[0]
+                        # Add the image to the batch.
+                        batch_x[i] = x
+
+                    prediction += self.model.predict(batch_x, batch_size=num_imgs) / float(num_fold_tta)
                 avg_pred = prediction.mean(axis=0)
                 cat_idx = np.argmax(avg_pred)
 
