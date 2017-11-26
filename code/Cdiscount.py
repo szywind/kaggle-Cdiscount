@@ -111,8 +111,15 @@ class Cdiscount():
         # models.compile(optimizer=RMSprop(lr=1e-4))
         # self.model = models.get_model()
 
-        # self.model = resnet152_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
-        self.model = resnet101_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
+        if self.base_model == 'resnet101':
+            self.model = resnet101_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
+        elif self.base_model == 'resnet152':
+            self.model = resnet152_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
+        elif self.base_model == 'inceptionV4':
+            models = Models(input_shape=(self.height, self.width, 3), classes=self.num_classes)
+            models.inceptionV3()
+            models.compile(optimizer=RMSprop(lr=1e-3))
+            self.model = models.get_model()
 
         self.model.summary()
 
