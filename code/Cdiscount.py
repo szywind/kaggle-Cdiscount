@@ -397,11 +397,12 @@ class Cdiscount():
 
 
         init_epochs = 0
+        nRepeat = 2
         for i in range(self.max_epochs):
             # gradually decrease the learning rate
             K.set_value(self.model.optimizer.lr, 0.95 * K.get_value(self.model.optimizer.lr))
-            start_epoch = (i * 2)
-            epochs = ((i + 1) * 2)
+            start_epoch = (i * nRepeat)
+            epochs = ((i + 1) * nRepeat)
             if i == 0:
                 verbose = 1
             else:
@@ -465,6 +466,51 @@ class Cdiscount():
 
                 batch_x = np.zeros((num_imgs, self.height, self.width, 3), dtype=K.floatx())
 
+                for i in range(num_imgs):
+                    bson_img = d["imgs"][i]["picture"]
+
+                    # Load and preprocess the image.
+                    img = load_img(io.BytesIO(bson_img))#, target_size=(self.height, self.width))
+                    x = img_to_array(img)
+
+                    x = random_crop(x, (self.height, self.width), center=True)
+
+                    x = test_datagen.random_transform(x)
+
+                    x = x[np.newaxis, ...]
+
+                    x = test_datagen.standardize(x)
+
+                    x = x[0]
+                    # Add the image to the batch.
+                    batch_x[i] = x
+
+                prediction = self.model.predict(batch_x, batch_size=num_imgs)
+                avg_pred = prediction.mean(axis=0)
+                cat_idx = np.argmax(avg_pred)
+
+                submission_df.iloc[c]["category_id"] = self.idx2cat[cat_idx]
+                pbar.update()
+
+        submission_df.to_csv("../submit/my_submission.csv.gz", compression="gzip", index=False)
+
+
+    def test_tta(self):
+        ''' test '''
+        self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
+        submission_df = pd.read_csv(data_dir + "sample_submission.csv")
+        submission_df.head()
+
+        test_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
+        data = bson.decode_file_iter(open(test_bson_path, "rb"))
+
+        with tqdm(total=num_test_products) as pbar:
+            for c, d in enumerate(data):
+                product_id = d["_id"]
+                num_imgs = len(d["imgs"])
+
+                batch_x = np.zeros((num_imgs, self.height, self.width, 3), dtype=K.floatx())
+
                 prediction = 0
                 for _ in range(num_fold_tta):
                     for i in range(num_imgs):
@@ -501,6 +547,6 @@ class Cdiscount():
 
 
 if __name__ == "__main__":
-    cdis = Cdiscount()
-    cdis.train()
+    cdis = Cdiscount(base_model="resnet101")
+    # cdis.train()
     cdis.test()
