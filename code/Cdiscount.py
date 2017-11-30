@@ -26,7 +26,9 @@ from keras.preprocessing.image import Iterator
 # from keras.applications.inception_v3 import preprocess_input
 from keras.applications.resnet50 import preprocess_input
 
+from resnet_152 import resnet152_model
 from resnet_101 import resnet101_model
+
 # Input data files are available in the "../input/" directory.
 # For example, running this (by clicking run or pressing Shift+Enter) will list the files in the input directory
 
@@ -57,6 +59,7 @@ categories_df["category_idx"] = pd.Series(range(len(categories_df)), index=categ
 categories_df.to_csv("categories.csv")
 categories_df.head()
 
+num_fold_tta = 5
 
 def random_crop(img, dstSize, center=False):
     import random
@@ -71,7 +74,7 @@ def random_crop(img, dstSize, center=False):
     return img[y0:y0+dstH, x0:x0+dstW]
 
 class Cdiscount():
-    def __init__(self, height=160, width=160, batch_size=36, max_epochs=40, base_model='inceptionV3', num_classes=5270):
+    def __init__(self, height=160, width=160, batch_size=40, max_epochs=40, base_model='inceptionV3', num_classes=5270):
         self.height = height
         self.width = width
         self.batch_size = batch_size
@@ -108,7 +111,9 @@ class Cdiscount():
         # models.compile(optimizer=RMSprop(lr=1e-4))
         # self.model = models.get_model()
 
+        # self.model = resnet152_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
         self.model = resnet101_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
+
         self.model.summary()
 
 
@@ -334,10 +339,11 @@ class Cdiscount():
         # Tip: use ImageDataGenerator for data augmentation and preprocessing.
         train_datagen = ImageDataGenerator(horizontal_flip=True,
                                            preprocessing_function=preprocess_input,
-                                           shear_range=0.1,
-                                           #height_shift_range=0.1,
-                                           #width_shift_range=0.1,
-                                           zoom_range=[1.0, 1.1])
+                                           # shear_range=0.2,
+                                           # height_shift_range=0.1,
+                                           # width_shift_range=0.1,
+                                           # zoom_range=[1.0, 1.2]
+                                           )
         self.train_gen = BSONIterator(train_bson_file, train_images_df, train_offsets_df,
                                  self.num_classes, train_datagen, lock,
                                  batch_size=self.batch_size, shuffle=True,
@@ -381,28 +387,27 @@ class Cdiscount():
                                    patience=4,
                                    verbose=1)]
 
-        self.model.fit_generator(generator=self.train_gen,
-                            steps_per_epoch=np.ceil(self.num_train_images / float(self.batch_size)),
-                            epochs=1,
-                            verbose=1,
-                            validation_data=self.val_gen,
-                            validation_steps=np.ceil(self.num_val_images / float(self.batch_size)),
-                            callbacks=callbacks,
-                            workers=8)
-        init_epochs = 1
+
+
+        init_epochs = 0
         for i in range(self.max_epochs):
             # gradually decrease the learning rate
             K.set_value(self.model.optimizer.lr, 0.95 * K.get_value(self.model.optimizer.lr))
             start_epoch = (i * 2)
             epochs = ((i + 1) * 2)
+            if i == 0:
+                verbose = 1
+            else:
+                verbose = 2
             self.model.fit_generator(generator=self.train_gen,
                                 steps_per_epoch=np.ceil(self.num_train_images / float(self.batch_size)),
-                                verbose=2,
+                                verbose=verbose,
                                 validation_data=self.val_gen,
                                 validation_steps=np.ceil(self.num_val_images / float(self.batch_size)),
                                 initial_epoch=start_epoch + init_epochs,
                                 epochs=epochs + init_epochs,
                                 callbacks=callbacks)
+
 
         # from keras.models import Sequential
         # from keras.layers import Dropout, Flatten, Dense
@@ -453,23 +458,28 @@ class Cdiscount():
 
                 batch_x = np.zeros((num_imgs, self.height, self.width, 3), dtype=K.floatx())
 
-                for i in range(num_imgs):
-                    bson_img = d["imgs"][i]["picture"]
+                prediction = 0
+                for _ in range(num_fold_tta):
+                    for i in range(num_imgs):
+                        bson_img = d["imgs"][i]["picture"]
 
-                    # Load and preprocess the image.
-                    img = load_img(io.BytesIO(bson_img), target_size=(self.height, self.width))
-                    x = img_to_array(img)
-                    x = test_datagen.random_transform(x)
+                        # Load and preprocess the image.
+                        img = load_img(io.BytesIO(bson_img)) #, target_size=(self.height, self.width))
+                        x = img_to_array(img)
 
-                    x = x[np.newaxis, ...]
+                        x = random_crop(x, (self.height, self.width))
 
-                    x = test_datagen.standardize(x)
+                        x = test_datagen.random_transform(x)
 
-                    x = x[0]
-                    # Add the image to the batch.
-                    batch_x[i] = x
+                        x = x[np.newaxis, ...]
 
-                prediction = self.model.predict(batch_x, batch_size=num_imgs)
+                        x = test_datagen.standardize(x)
+
+                        x = x[0]
+                        # Add the image to the batch.
+                        batch_x[i] = x
+
+                    prediction += self.model.predict(batch_x, batch_size=num_imgs) / float(num_fold_tta)
                 avg_pred = prediction.mean(axis=0)
                 cat_idx = np.argmax(avg_pred)
 
