@@ -17,7 +17,7 @@ import tensorflow as tf
 from collections import defaultdict
 from tqdm import *
 from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
-from keras.optimizers import RMSprop
+from keras.optimizers import RMSprop, SGD
 
 from keras import backend as K
 from keras.preprocessing.image import ImageDataGenerator
@@ -115,10 +115,14 @@ class Cdiscount():
             self.model = resnet101_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
         elif self.base_model == 'resnet152':
             self.model = resnet152_model(self.height, self.width, color_type=3, num_classes=self.num_classes)
-        elif self.base_model == 'inceptionV4':
+        else:
             models = Models(input_shape=(self.height, self.width, 3), classes=self.num_classes)
-            models.inceptionV3()
-            models.compile(optimizer=RMSprop(lr=1e-3))
+            if self.base_model == 'inceptionV4':
+                models.inceptionV3()
+            elif self.base_model == 'inceptionResnetV2':
+                models.inceptionResnetV2()
+            sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
+            models.compile(optimizer=sgd)
             self.model = models.get_model()
 
         self.model.summary()
@@ -466,51 +470,6 @@ class Cdiscount():
 
                 batch_x = np.zeros((num_imgs, self.height, self.width, 3), dtype=K.floatx())
 
-                for i in range(num_imgs):
-                    bson_img = d["imgs"][i]["picture"]
-
-                    # Load and preprocess the image.
-                    img = load_img(io.BytesIO(bson_img))#, target_size=(self.height, self.width))
-                    x = img_to_array(img)
-
-                    x = random_crop(x, (self.height, self.width), center=True)
-
-                    x = test_datagen.random_transform(x)
-
-                    x = x[np.newaxis, ...]
-
-                    x = test_datagen.standardize(x)
-
-                    x = x[0]
-                    # Add the image to the batch.
-                    batch_x[i] = x
-
-                prediction = self.model.predict(batch_x, batch_size=num_imgs)
-                avg_pred = prediction.mean(axis=0)
-                cat_idx = np.argmax(avg_pred)
-
-                submission_df.iloc[c]["category_id"] = self.idx2cat[cat_idx]
-                pbar.update()
-
-        submission_df.to_csv("../submit/my_submission.csv.gz", compression="gzip", index=False)
-
-
-    def test_tta(self):
-        ''' test '''
-        self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
-        submission_df = pd.read_csv(data_dir + "sample_submission.csv")
-        submission_df.head()
-
-        test_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
-        data = bson.decode_file_iter(open(test_bson_path, "rb"))
-
-        with tqdm(total=num_test_products) as pbar:
-            for c, d in enumerate(data):
-                product_id = d["_id"]
-                num_imgs = len(d["imgs"])
-
-                batch_x = np.zeros((num_imgs, self.height, self.width, 3), dtype=K.floatx())
-
                 prediction = 0
                 for _ in range(num_fold_tta):
                     for i in range(num_imgs):
@@ -547,6 +506,6 @@ class Cdiscount():
 
 
 if __name__ == "__main__":
-    cdis = Cdiscount(base_model="resnet101")
-    # cdis.train()
+    cdis = Cdiscount()
+    cdis.train()
     cdis.test()
