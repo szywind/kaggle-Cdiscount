@@ -23,7 +23,7 @@ from keras import backend as K
 from keras.preprocessing.image import ImageDataGenerator
 from keras.preprocessing.image import Iterator
 
-# from keras.applications.inception_v3 import preprocess_input
+from keras.applications.inception_v3 import preprocess_input as inception_preprocess_input
 from keras.applications.resnet50 import preprocess_input
 
 from resnet_152 import resnet152_model
@@ -65,6 +65,8 @@ def random_crop(img, dstSize, center=False):
     import random
     srcH, srcW = img.shape[:2]
     dstH, dstW = dstSize
+    if srcH <= dstH or srcW <= dstW:
+        return img
     if center:
         y0 = int((srcH - dstH) / 2)
         x0 = int((srcW - dstW) / 2)
@@ -74,7 +76,7 @@ def random_crop(img, dstSize, center=False):
     return img[y0:y0+dstH, x0:x0+dstW]
 
 class Cdiscount():
-    def __init__(self, height=160, width=160, batch_size=40, max_epochs=40, base_model='inceptionV3', num_classes=5270):
+    def __init__(self, height=180, width=180, batch_size=32, max_epochs=10, base_model='resnet101', num_classes=5270):
         self.height = height
         self.width = width
         self.batch_size = batch_size
@@ -270,7 +272,7 @@ class Cdiscount():
         class BSONIterator(Iterator):
             def __init__(self, bson_file, images_df, offsets_df, num_class,
                          image_data_generator, lock, target_size=(180, 180),
-                         with_labels=True, batch_size=32, shuffle=False, seed=None, center=False):
+                         with_labels=True, batch_size=32, shuffle=True, seed=None, center=False):
 
                 self.file = bson_file
                 self.images_df = images_df
@@ -314,7 +316,7 @@ class Cdiscount():
 
                     # Preprocess the image.
                     x = img_to_array(img)
-                    x = random_crop(x, self.target_size, center=self.center)
+                    # x = random_crop(x, self.target_size, center=self.center)
                     x = self.image_data_generator.random_transform(x)
                     x = x[np.newaxis, ...]
                     x = self.image_data_generator.standardize(x)
@@ -401,16 +403,16 @@ class Cdiscount():
 
 
         init_epochs = 0
-        nRepeat = 2
+        nRepeat = 1
         for i in range(self.max_epochs):
             # gradually decrease the learning rate
-            K.set_value(self.model.optimizer.lr, 0.95 * K.get_value(self.model.optimizer.lr))
+            if i:
+                K.set_value(self.model.optimizer.lr, 0.5 * K.get_value(self.model.optimizer.lr))
             start_epoch = (i * nRepeat)
             epochs = ((i + 1) * nRepeat)
-            if i == 0:
-                verbose = 1
-            else:
-                verbose = 2
+
+            verbose = 1
+
             self.model.fit_generator(generator=self.train_gen,
                                 steps_per_epoch=np.ceil(self.num_train_images / float(self.batch_size)),
                                 verbose=verbose,
@@ -454,7 +456,138 @@ class Cdiscount():
         # To evaluate on the validation set:
         #model.evaluate_generator(val_gen, steps=num_val_images // batch_size, workers=8)
 
+    def test_ensemble(self):
+        ''' test ensemble several different models '''
+        model1 = resnet101_model(180, 180, color_type=3, num_classes=self.num_classes)
+        model2 = resnet101_model(160, 160, color_type=3, num_classes=self.num_classes)
+        # model3 = resnet152_model(160, 160, color_type=3, num_classes=self.num_classes)
+
+        models = Models(input_shape=(180, 180, 3), classes=self.num_classes)
+        models.inceptionResnetV2()
+        model4 = models.get_model()
+
+        model1.load_weights('../weights/best_weights_resnet101.hdf5')
+        model2.load_weights('../weights/best_weights_resnet101_160crop.hdf5')
+        # model3.load_weights('../weights/best_weights_resnet152_160crop.hdf5')
+        model4.load_weights('../weights/best_weights_inceptionResnetV2.hdf5')
+
+        submission_df = pd.read_csv(data_dir + "sample_submission.csv")
+        submission_df.head()
+
+        test_datagen_resnet = ImageDataGenerator(preprocessing_function=preprocess_input())
+        test_datagen_inception = ImageDataGenerator(preprocessing_function=inception_preprocess_input())
+
+        models = [{"model": model1, "crop": False, "datagen": test_datagen_resnet},
+                  {"model": model2, "crop": True, "datagen": test_datagen_resnet},
+                  {"model": model4, "crop": False, "datagen": test_datagen_inception}]
+
+        data = bson.decode_file_iter(open(test_bson_path, "rb"))
+
+        with tqdm(total=num_test_products) as pbar:
+            for c, d in enumerate(data):
+                num_imgs = len(d["imgs"])
+
+                avg_pred = 0
+                for model in models:
+                    batch_x = []
+
+                    for i in range(num_imgs):
+                        bson_img = d["imgs"][i]["picture"]
+
+                        # Load and preprocess the image.
+                        img = load_img(io.BytesIO(bson_img))#, target_size=(self.height, self.width))
+                        x = img_to_array(img)
+
+                        batch_x.append(self.preprocess(x, model))
+                    batch_x = np.array(batch_x, dtype=K.floatx())
+
+                    prediction = model["model"].predict(batch_x, batch_size=num_imgs)
+                    avg_pred += self.blending(prediction, 'median')
+                cat_idx = np.argmax(avg_pred)
+                submission_df.iloc[c]["category_id"] = self.idx2cat[cat_idx]
+                pbar.update()
+        submission_df.to_csv("../submit/my_submission_ensemble{}.csv.gz".format(len(models)), compression="gzip", index=False)
+
+
+    def preprocess(self, x, model):
+        if model["crop"]:
+            x = random_crop(x, (160, 160), center=True)
+        x = model["datagen"].random_transform(x)
+        x = x[np.newaxis, ...]
+        x = model["datagen"].standardize(x)
+        return x[0]
+
+
+
     def test(self):
+        ''' test '''
+        self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
+        submission_df = pd.read_csv(data_dir + "sample_submission.csv")
+        submission_df.head()
+
+        test_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
+        data = bson.decode_file_iter(open(test_bson_path, "rb"))
+
+        with tqdm(total=num_test_products) as pbar:
+            for c, d in enumerate(data):
+                product_id = d["_id"]
+                num_imgs = len(d["imgs"])
+
+                batch_x = np.zeros((num_imgs, self.height, self.width, 3), dtype=K.floatx())
+
+                for i in range(num_imgs):
+                    bson_img = d["imgs"][i]["picture"]
+
+                    # Load and preprocess the image.
+                    img = load_img(io.BytesIO(bson_img))#, target_size=(self.height, self.width))
+                    x = img_to_array(img)
+
+                    # x = random_crop(x, (self.height, self.width), center=True)
+
+                    x = test_datagen.random_transform(x)
+
+                    x = x[np.newaxis, ...]
+
+                    x = test_datagen.standardize(x)
+
+                    x = x[0]
+                    # Add the image to the batch.
+                    batch_x[i] = x
+
+                prediction = self.model.predict(batch_x, batch_size=num_imgs)
+                avg_pred = self.blending(prediction, 'median')
+                cat_idx = np.argmax(avg_pred)
+
+                submission_df.iloc[c]["category_id"] = self.idx2cat[cat_idx]
+                pbar.update()
+
+        submission_df.to_csv("../submit/my_submission.csv.gz", compression="gzip", index=False)
+
+
+
+    def blending(self, prediction, mode, cutoff_lo=0.8, cutoff_hi=0.2):
+        mean_pred = np.median(prediction, axis=0)
+        median_pred = np.median(prediction, axis=0)
+        min_pred = np.min(prediction, axis=0)
+        max_pred = np.max(prediction, axis=0)
+        if mode == 'mean':
+            return mean_pred
+        elif mode == 'median':
+            return median_pred
+        elif mode == 'minmax_median':
+            return np.where(np.all(prediction > cutoff_lo, axis=0),
+                            max_pred,
+                            np.where(np.all(prediction < cutoff_hi, axis=0),
+                                     min_pred,
+                                     median_pred))
+        elif mode == 'minmax_mean':
+            return np.where(np.all(prediction > cutoff_lo, axis=0),
+                            max_pred,
+                            np.where(np.all(prediction < cutoff_hi, axis=0),
+                                     min_pred,
+                                     mean_pred))
+
+    def test_tta(self):
         ''' test '''
         self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
         submission_df = pd.read_csv(data_dir + "sample_submission.csv")
@@ -479,7 +612,7 @@ class Cdiscount():
                         img = load_img(io.BytesIO(bson_img)) #, target_size=(self.height, self.width))
                         x = img_to_array(img)
 
-                        x = random_crop(x, (self.height, self.width))
+                        # x = random_crop(x, (self.height, self.width))
 
                         x = test_datagen.random_transform(x)
 

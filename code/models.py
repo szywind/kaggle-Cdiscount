@@ -3,7 +3,7 @@ from keras.applications.vgg16 import VGG16
 from keras.applications.vgg19 import VGG19
 from keras.applications.resnet50 import ResNet50
 from keras.applications.inception_v3 import InceptionV3
-from keras.applications.inception_resnet_v2 import InceptionResNetV2
+# from keras.applications.inception_resnet_v2 import InceptionResNetV2
 from keras.applications.xception import Xception
 from keras.layers import Flatten, Dense, GlobalAveragePooling2D
 
@@ -47,13 +47,13 @@ class Models:
         self.model.add(GlobalAveragePooling2D())
         self.model.add(Dense(self.classes, activation='softmax'))
 
-    def inceptionResnetV2(self):
-        base_model = InceptionResNetV2(include_top=False, weights='imagenet',
-                                       input_shape=self.input_shape)
-        base_model.trainable = True
-        self.model.add(base_model)
-        self.model.add(GlobalAveragePooling2D())
-        self.model.add(Dense(self.classes, activation='softmax'))
+    # def inceptionResnetV2(self):
+    #     base_model = InceptionResNetV2(include_top=False, weights='imagenet',
+    #                                    input_shape=self.input_shape)
+    #     base_model.trainable = True
+    #     self.model.add(base_model)
+    #     self.model.add(GlobalAveragePooling2D())
+    #     self.model.add(Dense(self.classes, activation='softmax'))
 
     def xception(self):
         base_model = Xception(include_top=False, weights='imagenet',
