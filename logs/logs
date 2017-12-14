@@ -1,0 +1,4 @@
+inceptionResnetV2:
+
+154733/154733 [==============================] - 171142s 1s/step - loss: 1.3597 - acc: 0.6531 - categorical_crossentropy: 1.6629 - val_loss: 1.4255 - val_acc: 0.6440 - val_categorical_crossentropy: 1.7147
+154733/154733 [==============================] - 172511s 1s/step - loss: 1.3109 - acc: 0.6612 - categorical_crossentropy: 1.6150 - val_loss: 1.4062 - val_acc: 0.6478 - val_categorical_crossentropy: 1.6948

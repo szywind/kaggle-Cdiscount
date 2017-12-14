@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from keras.optimizers import SGD, RMSprop, RMSpropAccum
-from keras.layers import Input, Dense, Conv2D, MaxPooling2D, AveragePooling2D, ZeroPadding2D, Flatten, Activation, Dropout
+from keras.layers import Input, Dense, Conv2D, MaxPooling2D, AveragePooling2D, ZeroPadding2D, Flatten, Activation, Dropout, GlobalAveragePooling2D
 from keras.layers.merge import add
 from keras.layers.normalization import BatchNormalization
 from keras.models import Model
@@ -91,7 +91,7 @@ def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2))
     x = Activation('relu', name='res' + str(stage) + block + '_relu')(x)
     return x
 
-def resnet101_model(img_rows, img_cols, color_type=1, num_classes=None):
+def resnet101_model(img_rows, img_cols, color_type=1, num_classes=None, mode=0):
     """
     Resnet 101 Model for Keras
 
@@ -161,8 +161,12 @@ def resnet101_model(img_rows, img_cols, color_type=1, num_classes=None):
     # Truncate and replace softmax layer for transfer learning
     # Cannot use model.layers.pop() since model is not of Sequential() type
     # The method below works since pre-trained weights are stored in layers but not in the model
-    x_newfc = AveragePooling2D((3, 3), name='avg_pool')(x)
-    x_newfc = Flatten()(x_newfc)
+    
+    if mode == 0:
+        x_newfc = GlobalAveragePooling2D()(x)
+    elif mode == 1:
+        x_newfc = AveragePooling2D((3, 3), name='avg_pool')(x)
+        x_newfc = Flatten()(x_newfc)
     x_newfc = Dropout(0.2)(x_newfc)
     x_newfc = Dense(num_classes, activation='softmax', name='fc8')(x_newfc)
 
