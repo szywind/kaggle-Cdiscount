@@ -91,7 +91,7 @@ def conv_block(input_tensor, kernel_size, filters, stage, block, strides=(2, 2))
     x = Activation('relu', name='res' + str(stage) + block + '_relu')(x)
     return x
 
-def resnet101_model(img_rows, img_cols, color_type=1, num_classes=None):
+def resnet101_model(img_rows, img_cols, color_type=1, num_classes=None, mode=0):
     """
     Resnet 101 Model for Keras
 
@@ -162,16 +162,18 @@ def resnet101_model(img_rows, img_cols, color_type=1, num_classes=None):
     # Cannot use model.layers.pop() since model is not of Sequential() type
     # The method below works since pre-trained weights are stored in layers but not in the model
 
-    # x_newfc = AveragePooling2D((3, 3), name='avg_pool')(x)
-    # x_newfc = Flatten()(x_newfc)
-    x_newfc = GlobalAveragePooling2D()(x)
+    if mode == 0:
+        x_newfc = GlobalAveragePooling2D()(x)
+    elif mode == 1:
+        x_newfc = AveragePooling2D((3, 3), name='avg_pool')(x)
+        x_newfc = Flatten()(x_newfc)
     x_newfc = Dropout(0.2)(x_newfc)
     x_newfc = Dense(num_classes, activation='softmax', name='fc8')(x_newfc)
 
     model = Model(img_input, x_newfc)
 
     # Learning rate is changed to 0.001
-    sgd = SGD(lr=1e-3, decay=1e-6, momentum=0.9, nesterov=True)
+    sgd = SGD(lr=1e-4, decay=1e-6, momentum=0.9, nesterov=True)
     # sgd = RMSpropAccum(lr=1e-4, decay=1e-6, accumulator=16)
 
     # model.compile(optimizer=sgd, loss='categorical_crossentropy', metrics=['accuracy'])
