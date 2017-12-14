@@ -161,7 +161,7 @@ def resnet101_model(img_rows, img_cols, color_type=1, num_classes=None, mode=0):
     # Truncate and replace softmax layer for transfer learning
     # Cannot use model.layers.pop() since model is not of Sequential() type
     # The method below works since pre-trained weights are stored in layers but not in the model
-    
+
     if mode == 0:
         x_newfc = GlobalAveragePooling2D()(x)
     elif mode == 1:
