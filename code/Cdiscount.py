@@ -511,7 +511,8 @@ class Cdiscount():
 
     def preprocess(self, x, model):
         if model["crop"]:
-            x = random_crop(x, (160, 160), center=True)
+            # x = random_crop(x, (160, 160), center=True)
+            x = cv2.resize(x, (160, 160))
         x = model["datagen"].random_transform(x)
         x = x[np.newaxis, ...]
         x = model["datagen"].standardize(x)
@@ -521,7 +522,8 @@ class Cdiscount():
 
     def test(self):
         ''' test '''
-        self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model))
+        # self.model.load_weights('../weights/best_weights_{}_160crop.hdf5'.format(self.base_model))
+        self.model.load_weights('../weights/best_weights_{}.hdf5'.format(self.base_model)) # TODO
         submission_df = pd.read_csv(data_dir + "sample_submission.csv")
         submission_df.head()
 
@@ -539,10 +541,8 @@ class Cdiscount():
                     bson_img = d["imgs"][i]["picture"]
 
                     # Load and preprocess the image.
-                    img = load_img(io.BytesIO(bson_img))#, target_size=(self.height, self.width))
+                    img = load_img(io.BytesIO(bson_img), target_size=(self.height, self.width))
                     x = img_to_array(img)
-
-                    # x = random_crop(x, (self.height, self.width), center=True)
 
                     x = test_datagen.random_transform(x)
 
@@ -555,7 +555,7 @@ class Cdiscount():
                     batch_x[i] = x
 
                 prediction = self.model.predict(batch_x, batch_size=num_imgs)
-                avg_pred = self.blending(prediction, 'median')
+                avg_pred = self.blending(prediction, 'mean') # TODO
                 cat_idx = np.argmax(avg_pred)
 
                 submission_df.iloc[c]["category_id"] = self.idx2cat[cat_idx]
@@ -566,7 +566,7 @@ class Cdiscount():
 
 
     def blending(self, prediction, mode, cutoff_lo=0.8, cutoff_hi=0.2):
-        mean_pred = np.median(prediction, axis=0)
+        mean_pred = prediction.mean(axis=0)
         median_pred = np.median(prediction, axis=0)
         min_pred = np.min(prediction, axis=0)
         max_pred = np.max(prediction, axis=0)
@@ -640,5 +640,5 @@ class Cdiscount():
 
 if __name__ == "__main__":
     cdis = Cdiscount()
-    cdis.train()
+    # cdis.train()
     cdis.test()

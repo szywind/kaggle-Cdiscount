@@ -162,7 +162,8 @@ def resnet101_model(img_rows, img_cols, color_type=1, num_classes=None):
     # Cannot use model.layers.pop() since model is not of Sequential() type
     # The method below works since pre-trained weights are stored in layers but not in the model
 
-    #x_newfc = AveragePooling2D((3, 3), name='avg_pool')(x)
+    # x_newfc = AveragePooling2D((3, 3), name='avg_pool')(x)
+    # x_newfc = Flatten()(x_newfc)
     x_newfc = GlobalAveragePooling2D()(x)
     x_newfc = Dropout(0.2)(x_newfc)
     x_newfc = Dense(num_classes, activation='softmax', name='fc8')(x_newfc)
